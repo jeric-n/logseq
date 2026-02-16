@@ -44,12 +44,12 @@
 
 (defonce db-sync-ws-url
   (if db-sync-local?
-    "wss://100.88.172.48:8787/sync/%s"
+    "wss://desktop-tvvuj82.tail3c3b96.ts.net:8787/sync/%s"
     "wss://logseq-sync-prod.logseq.workers.dev/sync/%s"))
 
 (defonce db-sync-http-base
   (if db-sync-local?
-    "https://100.88.172.48:8787"
+    "https://desktop-tvvuj82.tail3c3b96.ts.net:8787"
     "https://logseq-sync-prod.logseq.workers.dev"))
 
 ;; Feature flags

@@ -20,10 +20,10 @@ This document summarizes all changes made to enable self-hosted Logseq sync with
   (def IDENTITY-POOL-ID "<your-identity-pool-id>")
   (def OAUTH-DOMAIN "<your-oauth-domain>")
   ```
-- Changed sync server URLs to use HTTPS with Tailscale IP:
+- Changed sync server URLs to use HTTPS with Tailscale hostname:
   ```clojure
-  (defonce db-sync-ws-url "wss://100.88.172.48:8787/sync/%s")
-  (defonce db-sync-http-base "https://100.88.172.48:8787")
+  (defonce db-sync-ws-url "wss://<hostname>.<tailnet>.ts.net:8787/sync/%s")
+  (defonce db-sync-http-base "https://<hostname>.<tailnet>.ts.net:8787")
   ```
 
 ### 2. `src/main/frontend/handler/user.cljs`
@@ -62,7 +62,7 @@ This document summarizes all changes made to enable self-hosted Logseq sync with
 
 ### 5. `deps/db-sync/src/logseq/db_sync/node/server.cljs`
 
-**Purpose:** Add HTTPS server support with self-signed certificates.
+**Purpose:** Add HTTPS server support with SSL certificates.
 
 **Changes:**
 - Added imports for `https` and `fs` modules
@@ -76,11 +76,10 @@ This document summarizes all changes made to enable self-hosted Logseq sync with
 
 ### 1. `run-selfhost.sh`
 
-**Purpose:** Start both the sync server and webapp with HTTPS using self-signed certificates.
+**Purpose:** Start both the sync server and webapp with HTTPS using Tailscale certificates.
 
 **Features:**
-- Creates `certs/` directory in repo root
-- Auto-generates self-signed certificates for `100.88.172.48` (Tailscale IP) if missing
+- Uses Tailscale-provided Let's Encrypt certificates
 - Starts sync server with SSL environment variables
 - Starts web server with HTTPS using `serve --ssl-cert --ssl-key`
 
@@ -100,22 +99,48 @@ This document summarizes all changes made to enable self-hosted Logseq sync with
 
 ### 3. `certs/` directory
 
-**Purpose:** Store self-signed SSL certificates (auto-generated).
+**Purpose:** Store SSL certificates from Tailscale.
 
 **Contents:**
-- `cert.pem` - Self-signed SSL certificate
-- `key.pem` - Private key for the certificate
+- `<hostname>.<tailnet>.ts.net.crt` - Let's Encrypt certificate (from Tailscale)
+- `<hostname>.<tailnet>.ts.net.key` - Private key for the certificate
 
-## AWS Cognito Setup Requirements
+## Prerequisites
+
+### AWS Cognito Setup
 
 1. **User Pool** - Create a user pool with email sign-in
 2. **App Client** - Create an app client WITHOUT a client secret (browser apps can't keep secrets)
 3. **App Client Settings** - Configure:
-   - Callback URLs: `logseq://auth-callback` and `https://100.88.172.48:3000`
+   - Callback URLs: `logseq://auth-callback` and `https://<hostname>.<tailnet>.ts.net:<port>`
    - Allowed OAuth flows: Authorization code grant
    - Scopes: `email`, `openid`, `phone`
 4. **Identity Pool** - Create an identity pool linked to your user pool
 5. **Domain** - Configure a domain for OAuth (e.g., `your-app.auth.region.amazoncognito.com`)
+
+### Tailscale Setup (for HTTPS)
+
+1. **Install Tailscale** on your Windows host
+2. **Enable HTTPS certificates** in Tailscale admin console (Settings → HTTPS)
+3. **Generate certificates** on Windows:
+   ```powershell
+   tailscale cert
+   ```
+4. **Copy certificates** to WSL `certs/` directory:
+   - `<hostname>.<tailnet>.ts.net.crt`
+   - `<hostname>.<tailnet>.ts.net.key`
+
+### Port Forwarding (Windows → WSL)
+
+Forward these ports from Windows to WSL:
+- `<web-port>` (default: 3000) - Web app
+- `8787` - Sync server
+
+Example (run in Windows PowerShell as Admin):
+```powershell
+netsh interface portproxy add v4tov4 listenport=3000 listenaddress=0.0.0.0 connectport=3000 connectaddress=<wsl-ip>
+netsh interface portproxy add v4tov4 listenport=8787 listenaddress=0.0.0.0 connectport=8787 connectaddress=<wsl-ip>
+```
 
 ## Build Requirements
 
@@ -147,13 +172,11 @@ This document summarizes all changes made to enable self-hosted Logseq sync with
    ./run-selfhost.sh
    ```
 
-2. Open https://100.88.172.48:3000 in your browser
+2. Open `https://<hostname>.<tailnet>.ts.net:<port>` in your browser
 
-3. **Accept the self-signed certificate warning** in your browser
+3. Create an account and sign in
 
-4. Create an account and sign in
-
-5. Create a new graph with "Use Logseq Sync" checked
+4. Create a new graph with "Use Logseq Sync" checked
 
 ## HTTPS Requirements
 
@@ -162,24 +185,34 @@ HTTPS is required for:
 - **Secure Context** - Required by browsers for certain APIs
 - **Remote access** - Accessing from other devices (Tailscale, etc.)
 
-The self-signed certificate is generated for:
-- IP: `100.88.172.48` (Tailscale IP)
-- DNS: `localhost` (for local testing)
+### Why Tailscale Certificates?
+
+Tailscale provides **real Let's Encrypt certificates** for your tailnet machines:
+- ✅ No browser certificate warnings
+- ✅ Trusted by all devices
+- ✅ Auto-renewal handled by Tailscale
+- ✅ Works from any device on your tailnet
+
+## Architecture
+
+```
+[Other Devices] ──Tailscale──> [Windows: <hostname>.ts.net] ──port forward──> [WSL: sync server + webapp]
+```
 
 ## Troubleshooting
 
-### Certificate Warnings
-- Accept the self-signed certificate warning in your browser
-- For Chrome, you may need to type `thisisunsafe` on the warning page
-- For Firefox, add a permanent exception
+### Certificate Not Found Error
+- Run `tailscale cert` on Windows to generate certificates
+- Copy both `.crt` and `.key` files to the `certs/` directory
+- Ensure filenames match the hostname in `config.cljs`
 
 ### SQLite/OPFS Errors
 - Ensure you're using HTTPS (not HTTP)
-- Check that the certificate matches the host you're accessing
-- Verify you accepted the certificate warning
+- Check that the hostname in the URL matches the certificate
+- Verify you're accessing via the Tailscale hostname
 
 ### CORS Errors
-- Ensure both webapp and sync server are using the same host (IP or localhost)
+- Ensure both webapp and sync server are using the same hostname
 - Check that HTTPS is used for both
 
 ### JWT Verification Failures
@@ -192,9 +225,10 @@ The self-signed certificate is generated for:
 
 ### Graph Creation Silently Fails
 - Check browser console for error messages
-- Verify sync server is running at https://100.88.172.48:8787/health
+- Verify sync server is running at `https://<hostname>.ts.net:8787/health`
 
 ### Connection Refused
 - Verify both servers are running
-- Check that ports 3000 and 8787 are not blocked by firewall
-- Ensure Tailscale is connected if using Tailscale IP
+- Check that port forwarding is configured (Windows → WSL)
+- Ensure Tailscale is connected
+- Verify firewall allows the ports

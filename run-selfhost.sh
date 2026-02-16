@@ -5,29 +5,19 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PORT=${1:-3000}
 SYNC_PORT=8787
-HOST="100.88.172.48"
+HOST="desktop-tvvuj82.tail3c3b96.ts.net"
 
 CERTS_DIR="$SCRIPT_DIR/certs"
-CERT_FILE="$CERTS_DIR/cert.pem"
-KEY_FILE="$CERTS_DIR/key.pem"
+CERT_FILE="$CERTS_DIR/desktop-tvvuj82.tail3c3b96.ts.net.crt"
+KEY_FILE="$CERTS_DIR/desktop-tvvuj82.tail3c3b96.ts.net.key"
 
-# Create certs directory
-mkdir -p "$CERTS_DIR"
-
-# Auto-generate self-signed certificates if missing
+# Check that Tailscale certs exist
 if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
-    echo "Generating self-signed certificate for $HOST..."
-    openssl req -x509 -newkey rsa:4096 \
-        -keyout "$KEY_FILE" \
-        -out "$CERT_FILE" \
-        -days 365 -nodes \
-        -subj "/CN=$HOST" \
-        -addext "subjectAltName=IP:$HOST,DNS:localhost" 2>/dev/null
-    if [ $? -ne 0 ]; then
-        echo "Error: Failed to generate certificates. Make sure openssl is installed."
-        exit 1
-    fi
-    echo "Certificates generated successfully."
+    echo "Error: Tailscale certificates not found."
+    echo "Run 'tailscale cert' on Windows and copy the cert/key files to:"
+    echo "  $CERT_FILE"
+    echo "  $KEY_FILE"
+    exit 1
 fi
 
 # Cognito credentials
@@ -45,7 +35,7 @@ echo "Starting self-host Logseq with HTTPS..."
 echo "  Sync server: https://$HOST:$SYNC_PORT"
 echo "  Web app:     https://$HOST:$PORT"
 echo ""
-echo "Note: You may need to accept the self-signed certificate in your browser."
+echo "Using Tailscale-provided Let's Encrypt certificate."
 echo ""
 
 # Kill any existing processes on exit
