@@ -13,13 +13,11 @@ export function t(key: string, ...args: any) {
 export function init({ lang, authCognito }: any) {
   setNSDicts('amplify', require('./lang').default)
   if (lang) setLocale(lang)
-  const { userPoolClientSecret, ...rest } = authCognito
   Amplify.configure({
     Auth: {
       Cognito: {
-        ...rest,
-        loginWith: { email: true },
-        ...(userPoolClientSecret ? { userPoolClientSecret } : {})
+        ...authCognito,
+        loginWith: { email: true }
       }
     }
   })

@@ -1,5 +1,7 @@
 (ns logseq.db-sync.node.server
-  (:require ["http" :as http]
+  (:require ["fs" :as fs]
+            ["http" :as http]
+            ["https" :as https]
             ["path" :as node-path]
             ["ws" :as ws]
             [lambdaisland.glogi :as log]
@@ -87,19 +89,42 @@
         deps {:config cfg
               :index-db index-db
               :assets-bucket assets-bucket}
-        server (.createServer http
-                              (fn [req res]
-                                (-> (p/let [request (platform-node/request-from-node req {:scheme "http"})
-                                            response (dispatch/handle-node-fetch {:request request
-                                                                                  :env env
-                                                                                  :registry registry
-                                                                                  :deps deps})]
-                                      (platform-node/send-response! res response))
-                                    (p/catch
-                                     (fn [e]
-                                       (log/error :db-sync/node-request-failed {:error e})
-                                       (js/console.error ":db-sync/node-request-failed" e)
-                                       (platform-node/send-response! res (worker-http/error-response "server error" 500)))))))
+        ssl-key (:ssl-key cfg)
+        ssl-cert (:ssl-cert cfg)
+        use-https? (and ssl-key ssl-cert
+                        (fs/existsSync ssl-key)
+                        (fs/existsSync ssl-cert))
+        scheme (if use-https? "https" "http")
+        server-opts (when use-https?
+                      #js {:key (fs/readFileSync ssl-key)
+                           :cert (fs/readFileSync ssl-cert)})
+        server (if use-https?
+                 (.createServer https server-opts
+                                (fn [req res]
+                                  (-> (p/let [request (platform-node/request-from-node req {:scheme scheme})
+                                              response (dispatch/handle-node-fetch {:request request
+                                                                                     :env env
+                                                                                     :registry registry
+                                                                                     :deps deps})]
+                                        (platform-node/send-response! res response))
+                                      (p/catch
+                                       (fn [e]
+                                         (log/error :db-sync/node-request-failed {:error e})
+                                         (js/console.error ":db-sync/node-request-failed" e)
+                                         (platform-node/send-response! res (worker-http/error-response "server error" 500)))))))
+                 (.createServer http
+                                (fn [req res]
+                                  (-> (p/let [request (platform-node/request-from-node req {:scheme scheme})
+                                              response (dispatch/handle-node-fetch {:request request
+                                                                                     :env env
+                                                                                     :registry registry
+                                                                                     :deps deps})]
+                                        (platform-node/send-response! res response))
+                                      (p/catch
+                                       (fn [e]
+                                         (log/error :db-sync/node-request-failed {:error e})
+                                         (js/console.error ":db-sync/node-request-failed" e)
+                                         (platform-node/send-response! res (worker-http/error-response "server error" 500))))))))
         WSS (or (.-WebSocketServer ws) (.-Server ws))
         ^js wss (new WSS #js {:noServer true})]
     (.on server "error" (fn [error] (log/error :db-sync/node-server-error {:error error})))
@@ -107,7 +132,7 @@
     (p/let [_ (index/<index-init! index-db)]
       (.on server "upgrade"
            (fn [req ^js socket head]
-             (let [request (platform-node/request-from-node req {:scheme "http"})
+             (let [request (platform-node/request-from-node req {:scheme scheme})
                    url (platform/request-url request)
                    path (.-pathname url)
                    parsed (node-routes/parse-sync-path path)
@@ -128,7 +153,8 @@
                             (fn [] (resolve nil)))))
               address (.address server)
               port (if (number? address) address (.-port address))
-              base-url (or (:base-url cfg) (str "http://localhost:" port))]
+              base-url (or (:base-url cfg) (str scheme "://localhost:" port))]
+        (js/console.log (str "Sync server running on " base-url))
         {:server server
          :wss wss
          :env env
