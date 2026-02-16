@@ -446,13 +446,16 @@
   [{:keys [cloud? graph-e2ee? refresh-token token user-uuid e2ee-rsa-key-ensured?]} set-e2ee-rsa-key-ensured?]
   (if (and cloud? graph-e2ee? refresh-token token user-uuid (not e2ee-rsa-key-ensured?))
     (-> (p/do!
+         (js/console.log "Setting db-sync config:" {:ws-url config/db-sync-ws-url :http-base config/db-sync-http-base})
          (state/<invoke-db-worker :thread-api/set-db-sync-config
                                   {:enabled? true
                                    :ws-url config/db-sync-ws-url
                                    :http-base config/db-sync-http-base})
          (p/let [rsa-key-pair (state/<invoke-db-worker :thread-api/db-sync-ensure-user-rsa-keys)]
+           (js/console.log "RSA key pair result:" rsa-key-pair)
            (set-e2ee-rsa-key-ensured? (some? rsa-key-pair))))
         (p/catch (fn [e]
+                   (js/console.error "Failed to ensure RSA keys:" e)
                    (log/error :db-sync/ensure-user-rsa-keys-failed e)
                    e)))
     (p/resolved nil)))
@@ -469,24 +472,26 @@
                    (when-not (or (string/blank? graph-name)
                                  creating-db?)
                      (if (invalid-graph-name? graph-name)
-                       (invalid-graph-name-warning)
-                       (do
-                         (set-creating-db? true)
-                         (p/let [repo (repo-handler/new-db! graph-name
-                                                            {:remote-graph? cloud?})]
-                           (when cloud?
-                             (->
-                              (p/do
-                                (state/set-state! :rtc/uploading? true)
-                                (rtc-handler/<rtc-create-graph! repo graph-e2ee?)
-                                (rtc-handler/<get-remote-graphs)
-                                (rtc-flows/trigger-rtc-start repo))
-                              (p/catch (fn [error]
-                                         (log/error :create-db-failed error)))
-                              (p/finally (fn []
-                                           (state/set-state! :rtc/uploading? false)
-                                           (set-creating-db? false)))))
-                           (shui/dialog-close!))))))
+                        (invalid-graph-name-warning)
+                        (do
+                          (set-creating-db? true)
+                          (p/let [repo (repo-handler/new-db! graph-name
+                                                             {:remote-graph? cloud?})]
+                            (if cloud?
+                              (->
+                               (p/do
+                                 (state/set-state! :rtc/uploading? true)
+                                 (rtc-handler/<rtc-create-graph! repo graph-e2ee?)
+                                 (rtc-handler/<get-remote-graphs)
+                                 (rtc-flows/trigger-rtc-start repo))
+                               (p/catch (fn [error]
+                                          (js/console.error "Failed to create remote graph:" error)
+                                          (notification/show! (str "Failed to create remote graph: " (or (ex-message error) error)) :error true)))
+                               (p/finally (fn []
+                                            (state/set-state! :rtc/uploading? false)
+                                            (set-creating-db? false))))
+                              (set-creating-db? false))
+                            (shui/dialog-close!))))))
         submit! (fn submit!
                   [^js e click?]
                   (when-let [value (and (or click? (= (gobj/get e "key") "Enter"))

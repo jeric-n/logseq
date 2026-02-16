@@ -312,7 +312,7 @@
 
 (defn rtc-group?
   []
-  (boolean (seq (set/intersection (state/user-groups) #{"team" "rtc_2025_07_10"}))))
+  true)
 
 (defn alpha-user?
   []

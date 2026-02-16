@@ -6,20 +6,20 @@ export const AuthFormRootContext = createContext<any>(null)
 export const useAuthFormState = () => {
   return useContext(AuthFormRootContext)
 }
-
 export function t(key: string, ...args: any) {
   return translate('amplify', key, ...args)
 }
 
 export function init({ lang, authCognito }: any) {
-  // Load default language
   setNSDicts('amplify', require('./lang').default)
   if (lang) setLocale(lang)
+  const { userPoolClientSecret, ...rest } = authCognito
   Amplify.configure({
     Auth: {
       Cognito: {
-        ...authCognito,
-        loginWith: { email: true }
+        ...rest,
+        loginWith: { email: true },
+        ...(userPoolClientSecret ? { userPoolClientSecret } : {})
       }
     }
   })
