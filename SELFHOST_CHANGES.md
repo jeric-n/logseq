@@ -167,16 +167,72 @@ netsh interface portproxy add v4tov4 listenport=8787 listenaddress=0.0.0.0 conne
 
 ## Running
 
-1. Start the sync server and webapp:
-   ```bash
-   ./run-selfhost.sh
-   ```
+### Manual Start
 
-2. Open `https://<hostname>.<tailnet>.ts.net:<port>` in your browser
+```bash
+./run-selfhost.sh [port]  # Default port is 3000
+```
 
-3. Create an account and sign in
+### Systemd Service (Auto-start on Boot)
 
-4. Create a new graph with "Use Logseq Sync" checked
+Create a systemd service for automatic startup:
+
+```bash
+sudo tee /etc/systemd/system/logseq-sync.service > /dev/null << 'EOF'
+[Unit]
+Description=Logseq Self-Host Sync Server
+After=network.target
+
+[Service]
+Type=simple
+User=<your-username>
+WorkingDirectory=/home/<your-username>/logseq
+Environment=PATH=/home/<your-username>/.nvm/versions/node/<node-version>/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=COGNITO_ISSUER=https://cognito-idp.<region>.amazonaws.com/<user-pool-id>
+Environment=COGNITO_CLIENT_ID=<client-id>
+Environment=COGNITO_JWKS_URL=https://cognito-idp.<region>.amazonaws.com/<user-pool-id>/.well-known/jwks.json
+Environment=DB_SYNC_PORT=8787
+ExecStart=/home/<your-username>/logseq/run-selfhost.sh 9005
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+**Important:** Replace:
+- `<your-username>` - Your WSL username
+- `<node-version>` - Your Node.js version (check with `node --version`, e.g., `v25.2.1`)
+- Cognito credentials with your values
+
+**Enable and start:**
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable logseq-sync
+sudo systemctl start logseq-sync
+```
+
+**Useful commands:**
+```bash
+# Check status
+sudo systemctl status logseq-sync
+
+# View logs
+sudo journalctl -u logseq-sync -f
+
+# Restart
+sudo systemctl restart logseq-sync
+
+# Stop
+sudo systemctl stop logseq-sync
+```
+
+### Access
+
+Open `https://<hostname>.<tailnet>.ts.net:<port>` in your browser
+
+Create an account and sign in, then create a new graph with "Use Logseq Sync" checked.
 
 ## HTTPS Requirements
 
