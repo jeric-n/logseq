@@ -42,15 +42,8 @@
 (goog-define ENABLE-DB-SYNC-LOCAL false)
 (defonce db-sync-local? ENABLE-DB-SYNC-LOCAL)
 
-(defonce db-sync-ws-url
-  (if db-sync-local?
-    "wss://desktop-tvvuj82.tail3c3b96.ts.net:8787/sync/%s"
-    "wss://logseq-sync-prod.logseq.workers.dev/sync/%s"))
-
-(defonce db-sync-http-base
-  (if db-sync-local?
-    "https://desktop-tvvuj82.tail3c3b96.ts.net:8787"
-    "https://logseq-sync-prod.logseq.workers.dev"))
+(defonce db-sync-ws-url "wss://desktop-tvvuj82.tail3c3b96.ts.net:8787/sync/%s")
+(defonce db-sync-http-base "https://desktop-tvvuj82.tail3c3b96.ts.net:8787")
 
 ;; Feature flags
 ;; =============
