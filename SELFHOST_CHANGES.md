@@ -20,11 +20,12 @@ This document summarizes all changes made to enable self-hosted Logseq sync with
   (def IDENTITY-POOL-ID "<your-identity-pool-id>")
   (def OAUTH-DOMAIN "<your-oauth-domain>")
   ```
-- Changed sync server URLs to use HTTPS with Tailscale hostname:
+- **Hardcoded sync server URLs** (removed conditional logic):
   ```clojure
   (defonce db-sync-ws-url "wss://<hostname>.<tailnet>.ts.net:8787/sync/%s")
   (defonce db-sync-http-base "https://<hostname>.<tailnet>.ts.net:8787")
   ```
+  > **Important:** The URLs must be hardcoded, not conditional on `db-sync-local?`. Otherwise, the built app will default to Logseq's production sync server.
 
 ### 2. `src/main/frontend/handler/user.cljs`
 
@@ -71,6 +72,17 @@ This document summarizes all changes made to enable self-hosted Logseq sync with
   - Create HTTPS server when SSL is configured, HTTP otherwise
   - Use appropriate scheme (`https` or `http`) in request handling
   - Log the server URL on startup
+
+### 6. `.github/workflows/build-desktop-release.yml`
+
+**Purpose:** Enable building desktop app for personal use without Logseq's signing credentials.
+
+**Changes:**
+- Commented out "Sign" step for Windows x64 build (lines 309-322)
+- Commented out "Sign" step for Windows arm64 build (lines 374-387)
+- Commented out "Upload Sentry Sourcemaps" step (lines 155-166)
+
+> **Note:** These changes are required because the signing requires Logseq's Azure credentials and Sentry requires their auth token.
 
 ## Files Created
 
@@ -144,6 +156,37 @@ netsh interface portproxy add v4tov4 listenport=8787 listenaddress=0.0.0.0 conne
 
 ## Build Requirements
 
+### Option 1: GitHub Actions (Recommended)
+
+The easiest way to build the desktop app is using GitHub Actions:
+
+1. **Push your fork to GitHub:**
+   ```bash
+   git remote set-url origin https://github.com/<your-username>/logseq
+   git remote add upstream https://github.com/logseq/logseq
+   git push -u origin master
+   ```
+
+2. **Trigger the workflow:**
+   - Go to your fork → Actions → "Build-Desktop-Release" → "Run workflow"
+   - Settings:
+     | Setting | Value |
+     |---------|-------|
+     | Build Target | `non-release` |
+     | Git Ref | `master` |
+     | Draft Release | `true` |
+     | Pre Release | `true` |
+     | File sync production mode | `false` (or any - URLs are hardcoded) |
+     | Build with plugin system support | `true` |
+     | Build Android App | unchecked |
+
+3. **Download the artifact:**
+   - Wait ~30-60 min for build to complete
+   - Download `logseq-win64-builds` artifact
+   - Contains `Logseq-win-x64-*.exe` and `Logseq-win-x64-*.msi`
+
+### Option 2: Local Build
+
 1. **Install dependencies:**
    ```bash
    yarn install --frozen-lockfile
@@ -160,10 +203,11 @@ netsh interface portproxy add v4tov4 listenport=8787 listenaddress=0.0.0.0 conne
    yarn build:node-adapter
    ```
 
-3. **Build the webapp:**
+3. **Build the desktop app:**
    ```bash
-   ENABLE_DB_SYNC_LOCAL=true yarn release
+   yarn release-electron
    ```
+   Output will be in `static/out/`
 
 ## Running
 
@@ -288,3 +332,14 @@ Tailscale provides **real Let's Encrypt certificates** for your tailnet machines
 - Check that port forwarding is configured (Windows → WSL)
 - Ensure Tailscale is connected
 - Verify firewall allows the ports
+
+### Sync Graph Creation Fails / Creates Local Graph Instead
+- **Cause:** Sync server URLs are still conditional on `db-sync-local?`
+- **Fix:** Hardcode the URLs in `config.cljs` instead of using `if db-sync-local?`
+- Verify in browser console that the app is connecting to your server URL, not `logseq-sync-prod.logseq.workers.dev`
+
+### Encryption Checkbox Blocks Graph Creation
+- **Cause:** RSA key generation requires the sync server's `/e2ee/user-rsa-keys` endpoint
+- If the sync server URL is wrong, this request fails silently
+- Check browser console for errors related to RSA key generation
+- Ensure `db-sync-http-base` points to your self-hosted server
