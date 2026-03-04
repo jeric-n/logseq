@@ -84,6 +84,15 @@ This document summarizes all changes made to enable self-hosted Logseq sync with
 
 > **Note:** These changes are required because the signing requires Logseq's Azure credentials and Sentry requires their auth token.
 
+### 7. `deps/outliner/src/logseq/outliner/core.cljs` and `src/test/frontend/modules/outliner/core_test.cljs`
+
+**Purpose:** Fix nested block paste failures when pasting into an empty target block with UUID preservation enabled.
+
+**Changes:**
+- Fixed UUID remapping in `insert-blocks-aux` so `replace-empty-target?` always remaps the first pasted block UUID to the target block UUID, even when `keep-uuid?` is `true`.
+- This ensures child blocks referencing the first pasted block as parent are remapped to the replaced target UUID, preventing "Nothing found for entity id" transaction failures.
+- Added regression test: `test-cut-paste-parent-child-into-empty-block` in `src/test/frontend/modules/outliner/core_test.cljs`.
+- Upstream commit reference: `b0ba993e0` (`fix: can't cut-paste blocks to empty target`).
 ## Files Created
 
 ### 1. `run-selfhost.sh`
