@@ -93,6 +93,20 @@ This document summarizes all changes made to enable self-hosted Logseq sync with
 - This ensures child blocks referencing the first pasted block as parent are remapped to the replaced target UUID, preventing "Nothing found for entity id" transaction failures.
 - Added regression test: `test-cut-paste-parent-child-into-empty-block` in `src/test/frontend/modules/outliner/core_test.cljs`.
 - Upstream commit reference: `b0ba993e0` (`fix: can't cut-paste blocks to empty target`).
+
+### 8. `src/main/frontend/worker/sync.cljs` and `src/test/frontend/worker/db_sync_test.cljs`
+
+**Purpose:** Prevent non-stale tx reject responses from permanently blocking local sync queues on remote graphs.
+
+**Changes:**
+- Added recovery logic for non-`"stale"` `tx/reject` responses:
+  - If a rejected inflight batch has multiple tx entries, client falls back to single-tx upload mode (`batch-size=1`) to isolate the offending tx.
+  - If a single inflight tx is rejected, only that tx is dropped from pending queue so later valid txs can continue syncing.
+- Added a configurable pending upload batch size in client state (default `50`) and reset behavior on successful upload (`tx/batch/ok`).
+- Added regression tests:
+  - `tx-reject-non-stale-switches-to-single-tx-batch-test`
+  - `tx-reject-non-stale-single-inflight-drops-only-offending-tx-test`
+
 ## Files Created
 
 ### 1. `run-selfhost.sh`

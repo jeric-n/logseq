@@ -310,6 +310,7 @@
 
 (def ^:private max-asset-size (* 100 1024 1024))
 (def ^:private upload-kvs-batch-size 500)
+(def ^:private default-pending-tx-batch-size 50)
 (def ^:private snapshot-content-type "application/transit+json")
 (def ^:private snapshot-content-encoding "gzip")
 (def ^:private snapshot-text-encoder (js/TextEncoder.))
@@ -836,6 +837,10 @@
 (defn- flush-pending!
   [repo client]
   (let [inflight @(:inflight client)
+        pending-tx-batch-size (let [size (some-> (:pending-tx-batch-size client) deref)]
+                                (if (and (integer? size) (pos? size))
+                                  size
+                                  default-pending-tx-batch-size))
         local-tx (or (client-op/get-local-tx repo) 0)
         remote-tx (get @*repo->latest-remote-tx repo)
         conn (worker-state/get-datascript-conn repo)]
@@ -843,7 +848,7 @@
       (when (empty? inflight)
         (when-let [ws (:ws client)]
           (when (and (ws-open? ws) (worker-state/online?))
-            (let [batch (pending-txs repo {:limit 50})]
+            (let [batch (pending-txs repo {:limit pending-tx-batch-size})]
               (when (seq batch)
                 (let [tx-ids (mapv :tx-id batch)
                       txs (mapcat :tx batch)
@@ -874,11 +879,42 @@
                      (p/catch (fn [error]
                                 (js/console.error error))))))))))))))
 
+(defn- set-pending-tx-batch-size!
+  [client size]
+  (when-let [*size (:pending-tx-batch-size client)]
+    (reset! *size (max 1 (or size default-pending-tx-batch-size)))))
+
+(defn- handle-non-stale-tx-reject!
+  [repo client reason]
+  (let [inflight (vec @(:inflight client))]
+    (log/warn :db-sync/tx-reject-non-stale
+              {:repo repo
+               :reason reason
+               :inflight-count (count inflight)})
+    (cond
+      (empty? inflight)
+      nil
+
+      (> (count inflight) 1)
+      (do
+        (set-pending-tx-batch-size! client 1)
+        (reset! (:inflight client) [])
+        (flush-pending! repo client))
+
+      :else
+      (do
+        ;; Drop the single offending tx so remaining queued txs can continue syncing.
+        (remove-pending-txs! repo inflight)
+        (reset! (:inflight client) [])
+        (set-pending-tx-batch-size! client default-pending-tx-batch-size)
+        (flush-pending! repo client)))))
+
 (defn- ensure-client-state! [repo]
   (let [client {:repo repo
                 :send-queue (atom (p/resolved nil))
                 :asset-queue (atom (p/resolved nil))
                 :inflight (atom [])
+                :pending-tx-batch-size (atom default-pending-tx-batch-size)
                 :reconnect (atom {:attempt 0 :timer nil})
                 :stale-kill-timer (atom nil)
                 :last-ws-message-ts (atom (common-util/time-ms))
@@ -1466,6 +1502,7 @@
                         (broadcast-rtc-state! client)
                         (remove-pending-txs! repo @(:inflight client))
                         (reset! (:inflight client) [])
+                        (set-pending-tx-batch-size! client default-pending-tx-batch-size)
                         (flush-pending! repo client))
         ;; Download response
         "pull/ok" (when (> remote-tx local-tx)
@@ -1513,8 +1550,7 @@
                           (mark-first-pull-sent! client :stale local-tx)
                           (send! (:ws client) {:type "pull" :since local-tx}))
 
-                        (fail-fast :db-sync/invalid-field
-                                   {:repo repo :type "tx/reject" :reason reason})))
+                        (handle-non-stale-tx-reject! repo client reason)))
         (fail-fast :db-sync/invalid-field
                    {:repo repo :type (:type message)})))))
 

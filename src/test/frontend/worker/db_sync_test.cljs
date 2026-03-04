@@ -177,6 +177,55 @@
              @(:online-users client)))
       (is (= 1 (count @broadcasts))))))
 
+(deftest tx-reject-non-stale-switches-to-single-tx-batch-test
+  (let [client {:repo test-repo
+                :graph-id "graph-1"
+                :inflight (atom ["tx-1" "tx-2"])
+                :pending-tx-batch-size (atom 50)
+                :online-users (atom [])
+                :ws-state (atom :open)}
+        raw-message (js/JSON.stringify
+                     (clj->js {:type "tx/reject"
+                               :reason "db transact failed"
+                               :t 0}))
+        flush-calls (atom 0)]
+    (with-redefs [client-op/get-local-tx (fn [_repo] 0)
+                  db-sync/flush-pending! (fn [_repo _client]
+                                           (swap! flush-calls inc)
+                                           nil)]
+      (#'db-sync/handle-message! test-repo client raw-message)
+      (is (= 1 @flush-calls))
+      (is (= 1 @(:pending-tx-batch-size client)))
+      (is (= [] @(:inflight client))))))
+
+(deftest tx-reject-non-stale-single-inflight-drops-only-offending-tx-test
+  (let [{:keys [conn client-ops-conn child1 child2]} (setup-parent-child)]
+    (with-datascript-conns conn client-ops-conn
+      (fn []
+        (d/transact! conn [[:db/add (:db/id child1) :block/title "child 1 local"]])
+        (d/transact! conn [[:db/add (:db/id child2) :block/title "child 2 local"]])
+        (let [pending-before (#'db-sync/pending-txs test-repo)
+              offending-tx-id (:tx-id (first pending-before))
+              client {:repo test-repo
+                      :graph-id "graph-1"
+                      :inflight (atom [offending-tx-id])
+                      :pending-tx-batch-size (atom 1)
+                      :online-users (atom [])
+                      :ws-state (atom :open)}
+              raw-message (js/JSON.stringify
+                           (clj->js {:type "tx/reject"
+                                     :reason "db transact failed"
+                                     :t 0}))]
+          (is (= 2 (count pending-before)))
+          (with-redefs [db-sync/flush-pending! (fn [_repo _client] nil)]
+            (#'db-sync/handle-message! test-repo client raw-message))
+          (let [pending-after (#'db-sync/pending-txs test-repo)
+                remaining-tx-ids (set (map :tx-id pending-after))]
+            (is (= 1 (count pending-after)))
+            (is (not (contains? remaining-tx-ids offending-tx-id)))
+            (is (= 50 @(:pending-tx-batch-size client)))
+            (is (= [] @(:inflight client)))))))))
+
 (deftest pull-ok-with-older-remote-tx-is-ignored-test
   (testing "pull/ok with remote tx behind local tx does not apply stale tx data"
     (let [{:keys [conn client-ops-conn parent]} (setup-parent-child)
